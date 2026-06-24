@@ -1,0 +1,62 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aic_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-interview_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-interview_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_interview_coach}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-interview_user}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: aic_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-interview_user}:${POSTGRES_PASSWORD:-interview_pass}@postgres:5432/${POSTGRES_DB:-ai_interview_coach}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      # Lets the backend container reach Ollama running on the Docker host
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aic_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  postgres_data:
+
+# -----------------------------------------------------------------------------
+# NOTE ON OLLAMA:
+# Ollama (and the Qwen3 model) is intentionally NOT containerized here, since it
+# typically runs best directly on the host machine with GPU access. Install
+# Ollama on your host, run `ollama pull qwen3:8b`, and `ollama serve` before
+# starting this stack. The backend reaches it via host.docker.internal:11434.
+# -----------------------------------------------------------------------------
